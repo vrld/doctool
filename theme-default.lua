@@ -118,6 +118,10 @@ actions['function'] = function(info)
 	return table.concat(out)
 end
 
+function actions.class(info)
+	return actions['function'](info):gsub('<h4>function', '<h4>class')
+end
+
 -- module
 function actions.module(info)
 	local modname = info[1]

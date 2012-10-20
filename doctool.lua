@@ -34,51 +34,53 @@ local function parse_sketch(F, str, pos)
 	return end_block+1
 end
 
-local function parse_function(M, str, pos, header)
-	local name, params, short_desc = header:match("^%s*function%s([^%(]+)(%b())%s+(%b[])")
-	if not (name and params and short_desc) then
-		name, params, short_desc = header:match("^%s*function%s([^{]+)(%b{})%s+(%b[])")
+local function parse_function_or_class(type)
+	return function(M, str, pos, header)
+		local name, params, short_desc = header:match("^%s*"..type.."%s([^%(]+)(%b())%s+(%b[])")
+		if not (name and params and short_desc) then
+			name, params, short_desc = header:match("^%s*"..type.."%s([^{]+)(%b{})%s+(%b[])")
+		end
+		assert(name and params and short_desc, "Line `"..header.."' has invalid formatting")
+		local has_table_args = params:sub(1,1) == '{'
+		params = params:sub(2,-2)
+		short_desc = short_desc:sub(2,-2)
+
+		-- shadow str with content of block
+		local end_function = str:find('\n### ', pos) or #str
+		str, pos = str:sub(pos, end_function), 1
+
+		local hashpos = str:find('\n#### ', pos) or #str
+		local long_desc = str:sub(pos, hashpos-1)
+
+		local F = {}
+		pos = hashpos + 1
+		while pos <= #str do
+			local endhash = str:find(' ', pos)+1
+			local endline = str:find('\n', endhash)-1
+			local line = str:sub(endhash, endline)
+
+			local processor = line:match("^%S+%s*$")
+			assert(processor, "Invalid format for "..type.." `" .. name .. "' in line `" .. line .. "'")
+			if processor:sub(-1,-1) == ':' then processor = processor:sub(1,-2) end
+			processor = processor:lower()
+			pos = (({
+				['parameters'] = parse_parameters,
+				['returns']    = parse_returns,
+				['example']    = parse_example,
+				['sketch']     = parse_sketch,
+			})[processor] or parse_section("####"))(F, str, endline+1, line)
+		end
+
+		M[#M+1] = {type = type,
+			has_table_args = has_table_args,
+			name,
+			params,
+			short_desc,
+			long_desc,
+			F
+		}
+		return end_function + 1
 	end
-	assert(name and params and short_desc, "Line `"..header.."' has invalid formatting")
-	local has_table_args = params:sub(1,1) == '{'
-	params = params:sub(2,-2)
-	short_desc = short_desc:sub(2,-2)
-
-	-- shadow str with content of function
-	local end_function = str:find('\n### ', pos) or #str
-	str, pos = str:sub(pos, end_function), 1
-
-	local hashpos = str:find('\n#### ', pos) or #str
-	local long_desc = str:sub(pos, hashpos-1)
-
-	local F = {}
-	pos = hashpos + 1
-	while pos <= #str do
-		local endhash = str:find(' ', pos)+1
-		local endline = str:find('\n', endhash)-1
-		local line = str:sub(endhash, endline)
-
-		local processor = line:match("^%S+%s*$")
-		assert(processor, "Invalid format for function `" .. name .. "' in line `" .. line .. "'")
-		if processor:sub(-1,-1) == ':' then processor = processor:sub(1,-2) end
-		processor = processor:lower()
-		pos = (({
-			['parameters'] = parse_parameters,
-			['returns']    = parse_returns,
-			['example']    = parse_example,
-			['sketch']     = parse_sketch,
-		})[processor] or parse_section("####"))(F, str, endline+1, line)
-	end
-
-	M[#M+1] = {type = 'function',
-		has_table_args = has_table_args,
-		name,
-		params,
-		short_desc,
-		long_desc,
-		F
-	}
-	return end_function + 1
 end
 
 local function parse_module(S, str, pos, header)
@@ -102,7 +104,8 @@ local function parse_module(S, str, pos, header)
 
 		local processor = line:match("^%S+"):lower()
 		pos = (({
-			['function'] = parse_function,
+			['function'] = parse_function_or_class('function'),
+			['class'] = parse_function_or_class('class'),
 			-- TODO: more stuff?
 		})[processor] or parse_section('###'))(M, str, endline+1, line)
 	end
